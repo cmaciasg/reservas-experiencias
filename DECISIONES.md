@@ -459,6 +459,44 @@ en local". `created_at` no es una regla de negocio (no vive en `Booking`,
 el dominio no la necesita) — es metadato de persistencia, solo para poder
 ofrecer un orden estable en este listado.
 
+## Aggregates sin Event Sourcing
+
+**Contexto:** `Session` y `Booking` son aggregate roots (identidad propia,
+protegen sus propias invariantes, son el único punto de entrada para tocar
+su estado). Es habitual asociar "aggregate" con Event Sourcing porque suelen
+aparecer juntos en el mismo tipo de proyectos — pero son dos decisiones
+independientes, y aquí solo se toma la primera.
+
+**Decisión:** persistencia clásica de "estado actual en columnas mutables".
+`session.available_seats` se decrementa/incrementa **in situ** con un
+`UPDATE` (ver `DbalSessionRepository::reserveSeats()`/`releaseSeats()`);
+`booking.status` pasa de `confirmed` a `cancelled` sobreescribiendo la misma
+fila (`ON DUPLICATE KEY UPDATE`). No hay una tabla de eventos
+(`SeatsReserved`, `BookingCancelled`, ...) que se reproduzca para calcular
+el estado actual — el valor guardado *es* la fuente de verdad directamente.
+
+**Alternativa descartada:** Event Sourcing — guardar la secuencia de eventos
+de cada `Session`/`Booking` y reconstruir el estado reproduciéndolos, con
+`available_seats`/`status` como una proyección derivada.
+
+**Por qué se descarta:** no hay ningún requisito de reconstruir estados
+pasados, auditoría temporal, varias proyecciones distintas del mismo
+historial, ni consumidores externos de esos eventos (analytics, otros
+microservicios). Añadirlo sería sobreingeniería — mismo criterio ya aplicado
+(y documentado) en la prueba de Visiotech al descartar `EffectivenessProvider`
+sin una segunda implementación real detrás, y al descartar explícitamente
+Event Sourcing para el combate por la misma razón.
+
+**Test rápido para defenderlo:** *"si perdiera toda la fila de `session`
+salvo el valor actual de `available_seats`, ¿perdería información de
+negocio?"* — No: nunca se guardó nada más que ese estado, nunca se prometió
+poder reconstruir "cómo se llegó hasta aquí". Si en el futuro hiciera falta
+trazabilidad (p. ej. "¿quién reservó y canceló cada plaza, y cuándo?"), la
+solución más barata sería una tabla de auditoría **derivada** (como
+`battle_turn` en Visiotech: un log que se escribe como subproducto, nunca se
+lee para reconstruir el estado) — no Event Sourcing real como estrategia de
+persistencia.
+
 ## Próximos pasos
 
 Revisión final de cara a la entrega: README con ejemplos de request/response
