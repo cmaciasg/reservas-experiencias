@@ -21,6 +21,8 @@ up:
 setup: up install
 	php bin/console doctrine:database:create --if-not-exists
 	php bin/console doctrine:database:create --if-not-exists --env=test
+	php bin/console app:db:init
+	php bin/console app:db:init --env=test
 
 serve:
 	php -S 127.0.0.1:8000 -t public public/index.php
@@ -36,6 +38,8 @@ reset:
 	$(MAKE) up
 	php bin/console doctrine:database:create --if-not-exists
 	php bin/console doctrine:database:create --if-not-exists --env=test
+	php bin/console app:db:init
+	php bin/console app:db:init --env=test
 
 down:
 	docker compose down

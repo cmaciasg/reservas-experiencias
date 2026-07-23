@@ -5,12 +5,12 @@ proveedores externos: registro de experiencias, sesiones con aforo y precio, y
 reservas de plazas con cancelación. DDD y arquitectura hexagonal reales
 (puertos/adaptadores explícitos), persistencia en MySQL vía Docker.
 
-**Estado actual:** entorno base + dominio modelado + casos de uso de
-Application (registrar experiencia, crear sesión, reservar plazas, cancelar
-reserva), todo probado con dobles en memoria (36 tests en verde, sin BD real
-todavía). Aún sin persistencia real ni endpoints (Infrastructure) — se irá
-ampliando en próximas sesiones. Este README crecerá con endpoints y más
-detalle a medida que avance la implementación.
+**Estado actual:** API funcional de extremo a extremo contra MySQL real —
+dominio, casos de uso, persistencia (Doctrine DBAL con UPDATE atómico
+anti-overbooking), controladores REST y notificación por log. 50 tests en
+verde (dominio puro, casos de uso con dobles en memoria, funcionales contra
+BD real, y un test de concurrencia con procesos del sistema operativo reales
+que demuestra que no hay overbooking).
 
 ## Stack
 
@@ -55,7 +55,51 @@ docker compose up -d
 composer install
 php bin/console doctrine:database:create --if-not-exists
 php bin/console doctrine:database:create --if-not-exists --env=test
+php bin/console app:db:init
+php bin/console app:db:init --env=test
 php -S 127.0.0.1:8000 -t public public/index.php
+```
+
+## Endpoints
+
+Sin autenticación (ids de proveedor/usuario inventados en el payload, tal
+como pide el enunciado). Payloads y respuestas en JSON, snake_case.
+
+| Acción | Endpoint | Body |
+|---|---|---|
+| Registrar experiencia | `POST /api/experiences` | `{"provider_id", "title", "description"}` |
+| Consultar experiencia | `GET /api/experiences/{id}` | — |
+| Crear sesión | `POST /api/experiences/{id}/sessions` | `{"date" (ISO 8601), "capacity", "price_cents"}` |
+| Consultar sesión | `GET /api/sessions/{id}` | — |
+| Reservar plazas | `POST /api/sessions/{id}/bookings` | `{"user_id", "seats"}` |
+| Cancelar reserva | `POST /api/bookings/{id}/cancel` | — |
+| Consultar reserva | `GET /api/bookings/{id}` | — |
+
+Códigos de error: `404` (recurso no encontrado), `409` (conflicto de
+negocio: sesión duplicada, sin plazas, sesión ya empezada, reserva ya
+cancelada, fuera de ventana de cancelación), `400` (payload inválido, p.ej.
+fecha de sesión en el pasado).
+
+Ejemplo de flujo completo:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/experiences \
+  -H 'Content-Type: application/json' \
+  -d '{"provider_id":"provider-1","title":"City Bike Tour","description":"A guided bike tour."}'
+# => {"id":"...","provider_id":"provider-1","title":"City Bike Tour",...}
+
+curl -X POST http://127.0.0.1:8000/api/experiences/{id}/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"date":"2026-08-10T18:00:00+00:00","capacity":5,"price_cents":2000}'
+# => {"id":"...","available_seats":5,...}
+
+curl -X POST http://127.0.0.1:8000/api/sessions/{id}/bookings \
+  -H 'Content-Type: application/json' \
+  -d '{"user_id":"user-1","seats":2}'
+# => {"id":"...","status":"confirmed","total_price_cents":4000,...}
+
+curl -X POST http://127.0.0.1:8000/api/bookings/{id}/cancel
+# => {"id":"...","status":"cancelled",...}
 ```
 
 ## Estructura del proyecto

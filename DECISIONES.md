@@ -259,9 +259,173 @@ está cancelado. El propio `Booking::cancel()` repite la comprobación de
 "ya cancelada" como defensa en profundidad (el agregado protege su invariante
 pase lo que pase, no solo cuando el servicio se acuerda de comprobarlo antes).
 
+## Fase 3 — Infrastructure
+
+### `reserveSeats()`/`releaseSeats()` contra MySQL: un único UPDATE condicional, verificado quitándolo
+
+**Decisión:** `DbalSessionRepository::reserveSeats()` ejecuta una sola
+sentencia `UPDATE session SET available_seats = available_seats - :seats
+WHERE id = :id AND available_seats >= :seats AND start_date > :now`, y
+comprueba las filas afectadas (`> 0` = éxito). `releaseSeats()` hace el
+inverso con `LEAST(capacity, available_seats + :seats)` para no superar el
+aforo por una liberación.
+
+**Cómo se verificó, no solo se argumentó:** se sustituyó temporalmente esa
+sentencia por la versión ingenua (`SELECT available_seats` + `sleep(50ms)` +
+`UPDATE ... SET available_seats = :nuevo_valor`, sin condición en el
+`WHERE`) y se volvió a correr `tests/Concurrency/NoOverbookingTest` — con
+20 peticiones concurrentes contra una sesión de aforo 5, la versión ingenua
+dejó "reservar" las 20 (`Failed asserting that 20 is identical to 5`), es
+decir, overbooking real y masivo. Se revirtió a la versión atómica y el test
+volvió a pasar. Esto da confianza en que el test realmente detecta el
+problema que dice prevenir, no que pasa "porque sí" al ejecutarse rápido en
+un solo proceso.
+
+**Por qué funciona:** MySQL/InnoDB aplica un row lock sobre la fila de
+`session` mientras dura el `UPDATE`; una segunda transacción que intente
+actualizar la misma fila espera a que la primera termine (commit) antes de
+evaluar su propio `WHERE` sobre el valor ya actualizado. No hay hueco entre
+"leer" y "escribir" porque son la misma operación atómica — a diferencia de
+la versión ingenua, donde el `sleep` entre el `SELECT` y el `UPDATE` deja una
+ventana en la que N procesos leen el mismo valor "disponible" antes de que
+ninguno haya escrito el suyo.
+
+### Test de concurrencia con procesos del sistema operativo reales (`proc_open`), no hilos/goroutines simulados
+
+**Decisión:** `tests/Concurrency/NoOverbookingTest` lanza 20 procesos PHP
+independientes vía `proc_open` (cada uno ejecuta
+`reserve-seats-worker.php`, que arranca el kernel de test real y llama al
+mismo `DbalSessionRepository::reserveSeats()` que usa la aplicación), en vez
+de simular la concurrencia con hilos o con llamadas secuenciales en el mismo
+proceso PHPUnit.
+
+**Por qué:** PHPUnit corre en un único proceso PHP secuencial — no hay
+manera de producir concurrencia real sin salir de ese proceso. `proc_open`
+arranca procesos del sistema operativo de verdad, que compiten de verdad por
+la misma fila de MySQL, que es exactamente la condición de carrera del
+enunciado ("sesiones que agotan sus plazas en minutos porque hay muchísima
+gente reservando a la vez"). Cada *worker* reutiliza el contenedor de
+servicios de test real (`test.service_container`, el mismo mecanismo que usa
+`KernelTestCase::getContainer()`) para llamar al código de producción tal
+cual, no una reimplementación de la query solo para el test.
+
+### `symfony/monolog-bundle` para `LogNotificationSender`, en vez de un logger casero
+
+**Decisión:** `LogNotificationSender` depende de `Psr\Log\LoggerInterface`
+(autowireable gracias a `symfony/monolog-bundle`), y registra en
+`var/log/{env}.log` lo que se "enviaría" al confirmar/cancelar una reserva.
+
+**Por qué:** el enunciado solo pide "plantear el código", no enviar un email
+real. Monolog es el logger estándar de Symfony (un requisito tan pequeño no
+justifica escribir un logger propio), y deja el adaptador listo para
+sustituirse por un `SmtpNotificationSender` real el día que haga falta, sin
+tocar Application ni Domain — el puerto (`NotificationSender`) ya existe
+desde la fase de modelado.
+
+### IDs con `Symfony\Component\Uid\Uuid`, entregando ya el `IdGenerator` prometido en la fase de Application
+
+**Decisión:** `UuidIdGenerator::generate()` devuelve `Uuid::v4()->toRfc4122()`
+(formato `xxxxxxxx-xxxx-...`), coherente con las columnas `VARCHAR(36)` del
+esquema.
+
+### Autowiring de puertos sin bindings explícitos en `services.yaml`
+
+**Decisión:** ningún `services.yaml` con alias manuales
+(`App\Domain\Repository\ExperienceRepository: '@...DbalExperienceRepository'`).
+
+**Por qué:** Symfony autowire automáticamente una interfaz a su única
+implementación registrada como servicio, sin configuración adicional,
+siempre que haya exactamente una clase que la implemente entre los
+servicios cargados — verificado con `bin/console debug:container
+App\Infrastructure\Controller\ExperienceController`, que muestra
+`DbalExperienceRepository` ya resuelto. Añadir bindings manuales habría sido
+repetir información que Symfony ya puede inferir.
+
+### `Psr\Clock\ClockInterface` real, sin adaptador propio
+
+**Decisión:** no se escribió ningún `NativeClockAdapter`: el propio
+`FrameworkBundle` ya registra un servicio `clock` y lo alias-ea tanto a
+`Symfony\Component\Clock\ClockInterface` como a `Psr\Clock\ClockInterface`
+en cuanto detecta `symfony/clock` instalado (verificado leyendo
+`FrameworkExtension.php`). Los servicios de Application, que ya dependían
+de `Psr\Clock\ClockInterface` desde la fase anterior, quedan conectados sin
+tocar nada.
+
+### Controladores dependen del puerto de repositorio directamente para los GET de apoyo
+
+**Decisión:** `ExperienceController::get()`, `SessionController::get()` y
+`BookingController::get()` inyectan el repositorio (`ExperienceRepository`,
+`SessionRepository`, `BookingRepository`) directamente, sin pasar por un
+servicio de Application dedicado a "buscar por id".
+
+**Por qué:** los GET son "de apoyo" (el enunciado no los pide, solo valora
+seguir principios REST) — envolver una consulta de una línea en un caso de
+uso completo sería ceremonia sin beneficio. Las 4 acciones que sí exige el
+enunciado (registrar, crear sesión, reservar, cancelar) sí pasan por su
+servicio de Application correspondiente, que es donde vive la orquestación
+real.
+
+### Rutas descubiertas automáticamente desde `src/Infrastructure/Controller/`, sin tocar `config/routes.yaml`
+
+**Decisión:** ningún cambio en `config/routes.yaml`. Verificado con
+`bin/console debug:router`: las 8 rutas aparecen solas.
+
+**Por qué:** Symfony no ata la carga de rutas por atributos a la carpeta
+`src/Controller/` por convención de nombre — etiqueta automáticamente
+(`routing.controller`) cualquier servicio autoconfigurado cuya clase tenga
+el atributo `#[Route]`, sea cual sea su namespace. Como `App\: resource:
+'../src/'` ya registra todo `src/` como servicios, mover los controladores a
+`Infrastructure/Controller/` (en vez de `src/Controller/`) no requiere
+configuración adicional.
+
+### Esquema con `CREATE TABLE IF NOT EXISTS` + comando propio, sin `doctrine/migrations`
+
+**Decisión:** `src/Infrastructure/Persistence/schema.sql` + `app:db:init`
+(comando de consola idempotente), igual que `InitSchemaCommand` en
+Visiotech.
+
+**Por qué:** mismo criterio ya aplicado allí — 3 tablas fijas para una
+prueba técnica, no un esquema en evolución en producción;
+`doctrine/migrations` sería ceremonia sin beneficio real aquí.
+
+### Regla "misma experiencia + mismo día" con patrón dual: columna generada + `UNIQUE`, y comprobación en Application
+
+**Decisión:** `session.session_date DATE GENERATED ALWAYS AS (DATE(start_date))
+STORED`, con `UNIQUE KEY (experience_id, session_date)` — además de la
+comprobación ya existente en `CreateSessionService`
+(`existsForExperienceOnDate`).
+
+**Por qué:** la comprobación de Application da un 409 con mensaje claro; el
+`UNIQUE` de MySQL es la red de seguridad real (evita duplicados aunque dos
+peticiones pasen la comprobación de Application casi a la vez — a
+diferencia del aforo, aquí no hace falta un UPDATE atómico porque no hay un
+contador que decrementar, basta con que la propia base de datos rechace el
+`INSERT` duplicado). MySQL 8 soporta columnas generadas indexables
+directamente; no hace falta comparar por rango de fechas en el índice.
+
+### Booking con `INSERT ... ON DUPLICATE KEY UPDATE`, no dos métodos `insert`/`update`
+
+**Decisión:** `DbalBookingRepository::save()` es la misma sentencia tanto
+para la creación (reserva confirmada) como para la cancelación posterior
+(mismo id, cambia `status`).
+
+**Por qué:** `Booking` es el único agregado que de verdad se
+"re-guarda" tras un cambio de estado (`Experience` y `Session` solo se
+guardan una vez en los casos de uso actuales). Una sola sentencia
+`ON DUPLICATE KEY UPDATE status = VALUES(status)` cubre ambos casos sin
+necesitar que el repositorio sepa si está insertando o actualizando.
+
+## Verificado de extremo a extremo
+
+`make reset && make test` (50 tests) sobre un MySQL recién creado desde
+cero, más pruebas manuales con `curl` contra el servidor embebido real:
+crear experiencia → crear sesión → reservar (total y aforo correctos) →
+sesión duplicada (409) → cancelar (plazas liberadas, log de notificación
+escrito en `var/log/dev.log`) → recancelar (409) → recurso inexistente
+(404).
+
 ## Próximos pasos
 
-Infrastructure: repositorios DBAL (con el UPDATE atómico real contra MySQL),
-adaptador de notificación (log), adaptador `IdGenerator` con
-`Symfony\Component\Uid`, controladores REST, y el test de concurrencia real
-en `tests/Concurrency` — ver plan acordado en `../notas.md`.
+Revisión final de cara a la entrega: README con ejemplos de request/response
+por endpoint, y repaso de la tabla de reglas de negocio del enunciado contra
+lo implementado.
