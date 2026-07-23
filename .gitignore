@@ -15,3 +15,7 @@
 ###< phpunit/phpunit ###
 
 .DS_Store
+
+# Postman desktop app's local file-based workspace sync, not the collection itself
+/postman/.postman/
+/postman/postman/

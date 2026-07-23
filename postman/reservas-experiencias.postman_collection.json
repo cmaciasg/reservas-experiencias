@@ -1,0 +1,292 @@
+{
+  "info": {
+    "name": "Reservas de Experiencias — Nalanda",
+    "description": "API de gestión de reservas de experiencias. Ejecuta las peticiones en orden (Register experience -> Create session -> Book seats -> ...): cada una guarda el id que necesita la siguiente en las variables de colección, sin tener que copiar/pegar nada a mano.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:8000" },
+    { "key": "experience_id", "value": "" },
+    { "key": "session_id", "value": "" },
+    { "key": "booking_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Register experience",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  pm.collectionVariables.set('experience_id', pm.response.json().id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"provider_id\": \"provider-1\",\n  \"title\": \"Linkin Park Live in Concert\",\n  \"description\": \"A live concert experience featuring Linkin Park.\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/experiences",
+          "host": ["{{base_url}}"],
+          "path": ["api", "experiences"]
+        }
+      }
+    },
+    {
+      "name": "2. Get experience",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/experiences/{{experience_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "experiences", "{{experience_id}}"]
+        }
+      }
+    },
+    {
+      "name": "3. Create session",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  pm.collectionVariables.set('session_id', pm.response.json().id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"date\": \"2027-01-15T18:00:00+00:00\",\n  \"capacity\": 5,\n  \"price_cents\": 2000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/experiences/{{experience_id}}/sessions",
+          "host": ["{{base_url}}"],
+          "path": ["api", "experiences", "{{experience_id}}", "sessions"]
+        }
+      }
+    },
+    {
+      "name": "4. Get session",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/sessions/{{session_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "sessions", "{{session_id}}"]
+        }
+      }
+    },
+    {
+      "name": "5. Create session (same day, expect 409 duplicate)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 409 (duplicate session date)', () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"date\": \"2027-01-15T09:00:00+00:00\",\n  \"capacity\": 10,\n  \"price_cents\": 1000\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/experiences/{{experience_id}}/sessions",
+          "host": ["{{base_url}}"],
+          "path": ["api", "experiences", "{{experience_id}}", "sessions"]
+        }
+      }
+    },
+    {
+      "name": "6. Book seats",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 201', () => pm.response.to.have.status(201));",
+              "if (pm.response.code === 201) {",
+              "  pm.collectionVariables.set('booking_id', pm.response.json().id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"user_id\": \"user-1\",\n  \"seats\": 2\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/sessions/{{session_id}}/bookings",
+          "host": ["{{base_url}}"],
+          "path": ["api", "sessions", "{{session_id}}", "bookings"]
+        }
+      }
+    },
+    {
+      "name": "7. Get booking",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/bookings/{{booking_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "bookings", "{{booking_id}}"]
+        }
+      }
+    },
+    {
+      "name": "8. Get session (seats should have decreased)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const body = pm.response.json();",
+              "pm.test('available_seats decreased to 3', () => pm.expect(body.available_seats).to.eql(3));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/sessions/{{session_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["api", "sessions", "{{session_id}}"]
+        }
+      }
+    },
+    {
+      "name": "9. List bookings for session",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('Contains the booking we just created', () => pm.expect(body.map(b => b.id)).to.include(pm.collectionVariables.get('booking_id')));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/sessions/{{session_id}}/bookings",
+          "host": ["{{base_url}}"],
+          "path": ["api", "sessions", "{{session_id}}", "bookings"]
+        }
+      }
+    },
+    {
+      "name": "10. List bookings for unknown session (expect 404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 404', () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/sessions/does-not-exist/bookings",
+          "host": ["{{base_url}}"],
+          "path": ["api", "sessions", "does-not-exist", "bookings"]
+        }
+      }
+    },
+    {
+      "name": "11. Cancel booking",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('Status is cancelled', () => pm.expect(body.status).to.eql('cancelled'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{base_url}}/api/bookings/{{booking_id}}/cancel",
+          "host": ["{{base_url}}"],
+          "path": ["api", "bookings", "{{booking_id}}", "cancel"]
+        }
+      }
+    },
+    {
+      "name": "12. Cancel booking again (expect 409 already cancelled)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 409 (already cancelled)', () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{base_url}}/api/bookings/{{booking_id}}/cancel",
+          "host": ["{{base_url}}"],
+          "path": ["api", "bookings", "{{booking_id}}", "cancel"]
+        }
+      }
+    },
+    {
+      "name": "13. Get unknown booking (expect 404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status is 404', () => pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{base_url}}/api/bookings/does-not-exist",
+          "host": ["{{base_url}}"],
+          "path": ["api", "bookings", "does-not-exist"]
+        }
+      }
+    }
+  ]
+}
