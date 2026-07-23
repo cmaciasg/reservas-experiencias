@@ -88,9 +88,98 @@ producción; notificación por log vs. SMTP real) — agrupar los puertos por ro
 ayuda a ver de un vistazo el contrato entre Domain e Infrastructure, que es
 precisamente lo que la arquitectura hexagonal quiere hacer explícito.
 
+## Fase 1 — Modelado del dominio
+
+### `Session` no contiene la lista de `Booking`, `Booking` referencia `sessionId`
+
+**Decisión:** `Booking` es su propio aggregate root, con `sessionId` como
+simple referencia (string), no una colección `Session::bookings`.
+
+**Alternativa descartada:** `Session` con una colección de `Booking` como
+parte de su propio aggregate.
+
+**Por qué:** una sesión con miles de reservas cargando toda la colección en
+memoria para reservar una plaza más sería absurdo, y además rompería el
+punto central del ejercicio: la concurrencia se resuelve con un UPDATE
+atómico sobre `available_seats`, no recorriendo/recalculando una lista de
+reservas en memoria. Mantener `availableSeats` como contador explícito en
+`Session` (en vez de derivarlo de `capacity - count(bookings confirmados)`)
+es lo que hace posible ese UPDATE atómico de una sola sentencia.
+
+### `Session::decreaseAvailableSeats`/`increaseAvailableSeats` existen, pero no son la solución de concurrencia real
+
+**Decisión:** el aggregate `Session` sí tiene métodos que mutan
+`availableSeats` en memoria (con sus invariantes: no bajar de 0, no superar
+`capacity`). Se usan en los tests de dominio y los usará el repositorio en
+memoria (`tests/Application/InMemory`, próximo paso).
+
+**Por qué no es contradictorio con "el UPDATE atómico es la solución real":**
+el puerto `SessionRepository` (`src/Domain/Repository/SessionRepository.php`)
+ya declara `reserveSeats()`/`releaseSeats()` como operaciones atómicas
+independientes — el adaptador MySQL (Infrastructure, próximo paso) las
+implementará con una única sentencia `UPDATE ... WHERE available_seats >= :n`
+condicional, **sin** cargar el `Session` en memoria primero. Los métodos del
+aggregate solo sirven para expresar la regla de negocio en el modelo y para
+que el doble en memoria de los tests de Application se comporte igual sin
+necesitar SQL de verdad. Es el mismo patrón dual ya aplicado a la regla de
+sesión duplicada (regla expresada en dos sitios, por dos motivos distintos:
+legibilidad del dominio vs. seguridad real de concurrencia).
+
+### `SessionAlreadyStartedException` no se lanza desde `Session`, se comprueba con `hasStartedAt()`
+
+**Decisión:** `Session` expone `hasStartedAt(DateTimeImmutable $now): bool`,
+una simple consulta sin efectos secundarios. La excepción
+`SessionAlreadyStartedException` la lanzará el caso de uso de Application
+(próximo paso) tras comprobarlo, y el UPDATE atómico de `reserveSeats()`
+repetirá la misma condición (`start_date > NOW()`) en el `WHERE` como defensa
+en profundidad (la sesión pudo empezar entre que se lee y que se reserva).
+
+**Por qué:** igual que con las plazas, la comprobación "en memoria" no puede
+ser la única fuente de verdad bajo concurrencia — solo la condición dentro
+del propio UPDATE atómico lo es. `hasStartedAt()` sirve para dar un error
+rápido y claro (409) sin llegar a intentar el UPDATE, no para garantizar la
+regla por sí sola.
+
+### `DuplicateSessionDateException`, `NotEnoughSeatsAvailableException`, etc. viven en `Domain/Exception/`, no una por aggregate
+
+**Decisión:** subcarpeta `src/Domain/Exception/` con un tipo por regla de
+negocio violada, en vez de anidar cada excepción junto a su aggregate o
+lanzar `\DomainException` genéricas.
+
+**Por qué:** mismo patrón que `src/Application/Exception` en Visiotech.
+Permite a Infrastructure (controladores, próximo paso) mapear cada tipo a un
+código HTTP concreto (404/409) con un único `catch` por tipo, sin parsear
+mensajes de texto.
+
+### `BookingCancellationPolicy` sin inyección de la ventana de 24h configurable
+
+**Decisión:** las 24 horas son una constante de clase
+(`CANCELLATION_WINDOW_HOURS`), no un parámetro de constructor.
+
+**Alternativa descartada:** inyectar el número de horas por constructor para
+"flexibilidad".
+
+**Por qué:** mismo criterio que se aplicó (y se revirtió) con
+`EffectivenessProvider` en Visiotech — es una regla de negocio fija del
+enunciado, no un valor que varíe por proveedor/entorno ni que necesite una
+segunda implementación real. Parametrizarla sería configurabilidad que nadie
+ha pedido. Los tests fijan fechas concretas alrededor de la frontera (24h/23h)
+en vez de necesitar inyectar una ventana distinta.
+
+### Precio en céntimos (`Money`), sin librería externa
+
+**Decisión:** value object propio con un único `int` (céntimos), sin
+`moneyphp/money` ni similar.
+
+**Por qué:** solo hace falta sumar y multiplicar por un entero (nº de
+plazas) para calcular `totalPrice`, sin conversión de divisas ni
+redondeos complejos — una dependencia externa sería sobreingeniería para
+esa necesidad.
+
 ## Próximos pasos
 
-Modelado del dominio (`Experience`, `Session`, `Booking`, `Money`,
-`BookingCancellationPolicy`) y estrategia de concurrencia (UPDATE condicional
-atómico) — ver plan acordado en `../notas.md`. Se documentará aquí con el
-mismo formato conforme se implemente cada regla de negocio.
+Application (casos de uso: `RegisterExperience`, `CreateSession`,
+`CreateBooking`, `CancelBooking`) con sus dobles en memoria
+(`tests/Application/InMemory`), y después Infrastructure (repositorios DBAL
+con el UPDATE atómico real, controladores, adaptador de notificación) — ver
+plan acordado en `../notas.md`.

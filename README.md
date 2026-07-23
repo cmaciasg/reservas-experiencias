@@ -5,10 +5,12 @@ proveedores externos: registro de experiencias, sesiones con aforo y precio, y
 reservas de plazas con cancelación. DDD y arquitectura hexagonal reales
 (puertos/adaptadores explícitos), persistencia en MySQL vía Docker.
 
-**Estado actual:** solo entorno base levantado (Symfony + MySQL + PHPUnit +
-esqueleto de carpetas). Aún sin lógica de negocio — se irá ampliando en
-próximas sesiones. Este README crecerá con endpoints, reglas de negocio y
-decisiones a medida que avance la implementación.
+**Estado actual:** entorno base + dominio modelado (`Experience`, `Session`,
+`Booking`, `Money`, `BookingCancellationPolicy`, puertos de repositorio y
+notificación), con tests de dominio puros en verde. Aún sin casos de uso
+(Application), persistencia real ni endpoints (Infrastructure) — se irá
+ampliando en próximas sesiones. Este README crecerá con endpoints y más
+detalle a medida que avance la implementación.
 
 ## Stack
 
