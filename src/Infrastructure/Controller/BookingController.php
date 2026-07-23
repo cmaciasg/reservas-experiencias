@@ -7,8 +7,10 @@ namespace App\Infrastructure\Controller;
 use App\Application\CancelBookingService;
 use App\Application\CreateBookingService;
 use App\Application\Exception\BookingNotFoundException;
+use App\Application\Exception\SessionNotFoundException;
 use App\Domain\Booking;
 use App\Domain\Repository\BookingRepository;
+use App\Domain\Repository\SessionRepository;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
@@ -19,6 +21,7 @@ final class BookingController extends AbstractApiController
         private readonly CreateBookingService $createBooking,
         private readonly CancelBookingService $cancelBooking,
         private readonly BookingRepository $bookings,
+        private readonly SessionRepository $sessions,
     ) {
     }
 
@@ -55,6 +58,18 @@ final class BookingController extends AbstractApiController
             }
 
             return self::toArray($booking);
+        });
+    }
+
+    #[Route('/api/sessions/{sessionId}/bookings', methods: ['GET'])]
+    public function listForSession(string $sessionId): JsonResponse
+    {
+        return $this->handle(function () use ($sessionId) {
+            if (null === $this->sessions->ofId($sessionId)) {
+                throw new SessionNotFoundException(sprintf('Session "%s" not found.', $sessionId));
+            }
+
+            return array_map(self::toArray(...), $this->bookings->findBySessionId($sessionId));
         });
     }
 

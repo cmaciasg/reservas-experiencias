@@ -424,6 +424,41 @@ sesión duplicada (409) → cancelar (plazas liberadas, log de notificación
 escrito en `var/log/dev.log`) → recancelar (409) → recurso inexistente
 (404).
 
+## Fase 3b — `GET /api/sessions/{id}/bookings` (endpoint de apoyo añadido tras probar con Postman)
+
+**Decisión:** nuevo método de puerto `BookingRepository::findBySessionId(string
+$sessionId): array`, implementado en `DbalBookingRepository` y en el doble en
+memoria; nueva ruta `GET /api/sessions/{sessionId}/bookings` en
+`BookingController` (404 si la sesión no existe).
+
+**Por qué surgió ahora:** al probar la API a mano con Postman se detectó que
+no había forma de listar las reservas de una sesión sin conocer sus ids de
+antemano — un GET de apoyo razonable (el enunciado valora principios REST),
+igual de "opcional" que los otros GETs ya existentes.
+
+### Bug encontrado y corregido: el orden de `SELECT ... WHERE session_id = ?` sin `ORDER BY` no es determinista
+
+**Qué pasó:** el primer test de este endpoint (`lists_the_bookings_of_a_session`,
+que crea dos reservas y espera recibirlas en el mismo orden en que se
+crearon) falló de forma intermitente: MySQL devolvía las filas en el orden
+físico de su índice clúster (el `PRIMARY KEY`), que aquí es un UUID
+aleatorio — no guarda ninguna relación con el orden de inserción.
+
+**Decisión:** se añadió una columna `created_at TIMESTAMP(6) NOT NULL DEFAULT
+CURRENT_TIMESTAMP(6)` a `booking` (rellenada sola por MySQL, sin tocar el
+`INSERT` del repositorio) y `ORDER BY created_at` en `findBySessionId()`.
+Precisión de microsegundos (`TIMESTAMP(6)`) para que dos reservas creadas en
+el mismo test (milisegundos de diferencia) no empaten.
+
+**Por qué importa como lección general:** es el mismo tipo de suposición
+implícita que el test de concurrencia ya había puesto a prueba en la fase
+anterior — "sin una garantía explícita (aquí `ORDER BY`; allí, el `UPDATE`
+atómico), el comportamiento por defecto de una base de datos bajo carga o
+con claves no secuenciales no es el que uno asume mirando solo el caso feliz
+en local". `created_at` no es una regla de negocio (no vive en `Booking`,
+el dominio no la necesita) — es metadato de persistencia, solo para poder
+ofrecer un orden estable en este listado.
+
 ## Próximos pasos
 
 Revisión final de cara a la entrega: README con ejemplos de request/response

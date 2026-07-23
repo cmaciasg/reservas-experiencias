@@ -7,7 +7,7 @@ reservas de plazas con cancelación. DDD y arquitectura hexagonal reales
 
 **Estado actual:** API funcional de extremo a extremo contra MySQL real —
 dominio, casos de uso, persistencia (Doctrine DBAL con UPDATE atómico
-anti-overbooking), controladores REST y notificación por log. 50 tests en
+anti-overbooking), controladores REST y notificación por log. 53 tests en
 verde (dominio puro, casos de uso con dobles en memoria, funcionales contra
 BD real, y un test de concurrencia con procesos del sistema operativo reales
 que demuestra que no hay overbooking).
@@ -74,6 +74,7 @@ como pide el enunciado). Payloads y respuestas en JSON, snake_case.
 | Reservar plazas | `POST /api/sessions/{id}/bookings` | `{"user_id", "seats"}` |
 | Cancelar reserva | `POST /api/bookings/{id}/cancel` | — |
 | Consultar reserva | `GET /api/bookings/{id}` | — |
+| Reservas de una sesión | `GET /api/sessions/{id}/bookings` | — |
 
 Códigos de error: `404` (recurso no encontrado), `409` (conflicto de
 negocio: sesión duplicada, sin plazas, sesión ya empezada, reserva ya

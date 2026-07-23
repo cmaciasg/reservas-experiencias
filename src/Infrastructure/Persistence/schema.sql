@@ -24,5 +24,6 @@ CREATE TABLE IF NOT EXISTS booking (
     seats INT UNSIGNED NOT NULL,
     total_price_cents INT UNSIGNED NOT NULL,
     status VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT fk_booking_session FOREIGN KEY (session_id) REFERENCES session (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

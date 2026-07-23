@@ -21,4 +21,12 @@ final class InMemoryBookingRepository implements BookingRepository
     {
         $this->bookings[$booking->id()] = $booking;
     }
+
+    public function findBySessionId(string $sessionId): array
+    {
+        return array_values(array_filter(
+            $this->bookings,
+            static fn (Booking $booking) => $booking->sessionId() === $sessionId,
+        ));
+    }
 }

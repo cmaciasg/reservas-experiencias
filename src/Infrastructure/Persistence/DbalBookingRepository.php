@@ -48,6 +48,18 @@ final class DbalBookingRepository implements BookingRepository
         );
     }
 
+    public function findBySessionId(string $sessionId): array
+    {
+        $rows = $this->connection->fetchAllAssociative(
+            'SELECT id, session_id, user_id, seats, total_price_cents, status FROM booking
+             WHERE session_id = :session_id
+             ORDER BY created_at',
+            ['session_id' => $sessionId],
+        );
+
+        return array_map(self::hydrate(...), $rows);
+    }
+
     /**
      * @param array<string, mixed> $row
      */

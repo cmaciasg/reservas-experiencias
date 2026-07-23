@@ -110,4 +110,38 @@ final class BookingControllerTest extends ApiTestCase
 
         self::assertSame(409, $this->client->getResponse()->getStatusCode());
     }
+
+    #[Test]
+    public function lists_the_bookings_of_a_session(): void
+    {
+        $session = $this->createSession(capacity: 5);
+        $this->requestJson('POST', "/api/sessions/{$session['id']}/bookings", ['user_id' => 'user-1', 'seats' => 2]);
+        $this->requestJson('POST', "/api/sessions/{$session['id']}/bookings", ['user_id' => 'user-2', 'seats' => 1]);
+
+        $this->client->request('GET', "/api/sessions/{$session['id']}/bookings");
+
+        self::assertSame(200, $this->client->getResponse()->getStatusCode());
+        $bookings = $this->jsonResponse();
+        self::assertCount(2, $bookings);
+        self::assertSame(['user-1', 'user-2'], array_column($bookings, 'user_id'));
+    }
+
+    #[Test]
+    public function returns_an_empty_list_for_a_session_without_bookings(): void
+    {
+        $session = $this->createSession(capacity: 5);
+
+        $this->client->request('GET', "/api/sessions/{$session['id']}/bookings");
+
+        self::assertSame(200, $this->client->getResponse()->getStatusCode());
+        self::assertSame([], $this->jsonResponse());
+    }
+
+    #[Test]
+    public function returns_404_when_listing_bookings_of_a_non_existing_session(): void
+    {
+        $this->client->request('GET', '/api/sessions/does-not-exist/bookings');
+
+        self::assertSame(404, $this->client->getResponse()->getStatusCode());
+    }
 }
