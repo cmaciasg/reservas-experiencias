@@ -544,9 +544,54 @@ regla.
 negocio y los 7 requisitos técnicos del enunciado están implementados y
 verificados. No se ha detectado ningún hueco.
 
+## Seguridad: secreto filtrado en `.env.dev`, corregido y purgado del historial
+
+**Qué pasó:** `.env.dev` traía, desde el primer commit, un `APP_SECRET` real
+y concreto (generado automáticamente por la receta de `symfony/framework-bundle`
+al crear el proyecto) en vez de quedar vacío como `.env` (la convención
+correcta — el valor real debe vivir solo en `.env.local`, no versionado).
+Se subió a GitHub por descuido: la receta lo genera así por defecto y no se
+revisó antes del primer commit.
+
+**Impacto real:** bajo — `APP_SECRET` protege CSRF/cookies firmadas en una
+API sin sesiones de usuario reales ni formularios, en un proyecto de prueba
+técnica sin datos sensibles. No es un secreto de un sistema en producción.
+Aun así, es exactamente el tipo de descuido que no debería pasar, y que ya
+se señaló como punto de mejora en una prueba técnica anterior — de ahí la
+corrección completa, no un simple parche.
+
+**Decisión:**
+1. Se borró `.env.dev` (no aportaba nada más que ese secreto) y se generó un
+   valor nuevo en `.env.local` (ya ignorado por git).
+2. Se purgó el fichero de **todo el historial** de git con `git-filter-repo
+   --path .env.dev --invert-paths` (no solo del commit actual) y se hizo
+   `push --force` — verificado clonando el repo desde cero después del
+   push: el string del secreto no aparece ni una vez en ninguno de los 11
+   commits.
+3. De paso, se parametrizaron las credenciales de MySQL en
+   `docker-compose.yml` con variables de entorno y valores por defecto
+   (`${MYSQL_PASSWORD:-app}`) en vez de hardcodearlas — mismo patrón que
+   usa la propia receta oficial de `doctrine-bundle` (que generó
+   `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-!ChangeMe!}` en Visiotech). No
+   son credenciales explotables (MySQL solo escucha en localhost), pero es
+   la convención correcta.
+4. Se sacó de git `config/reference.php` (fichero auto-generado por
+   Symfony para autocompletado de IDE, 1150 líneas, cero lógica propia) —
+   cruft del bootstrap sin necesidad de versionar.
+
+**Limitación conocida y honesta:** el `push --force` reemplaza las
+referencias (`refs`) del repositorio, pero GitHub puede conservar durante un
+tiempo objetos "colgantes" de los commits antiguos accesibles por su SHA
+exacto (no listados en ningún branch/tag, no descubribles navegando el
+repo). Dado que el valor no es un secreto real explotable y nadie hizo fork
+ni PR sobre el repo antes de esta purga, el riesgo residual es
+prácticamente nulo — pero no se afirma que sea matemáticamente imposible de
+recuperar por alguien con el SHA exacto, solo que ya no es alcanzable desde
+ningún sitio visible del repositorio.
+
 ## Próximos pasos
 
 Verificación en limpio desde un clon fresco de GitHub (simular exactamente
 lo que haría quien evalúa la prueba) y pulido menor (descripción del repo,
 metadatos de `composer.json`, mención de la colección de Postman en el
-README).
+README). — ambos ya hechos, ver más arriba.
