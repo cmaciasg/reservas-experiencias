@@ -1,4 +1,6 @@
 {
+    "name": "nalanda/reservas-experiencias",
+    "description": "API de gestión de reservas de experiencias — DDD y arquitectura hexagonal sobre Symfony, persistencia en MySQL.",
     "type": "project",
     "license": "proprietary",
     "minimum-stability": "stable",

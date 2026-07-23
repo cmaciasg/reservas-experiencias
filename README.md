@@ -103,6 +103,20 @@ curl -X POST http://127.0.0.1:8000/api/bookings/{id}/cancel
 # => {"id":"...","status":"cancelled",...}
 ```
 
+### Colección de Postman
+
+`postman/reservas-experiencias.postman_collection.json` cubre el flujo
+completo (registrar → crear sesión → reservar → listar reservas de la
+sesión → cancelar) más los casos de error (409 duplicado, 409 ya
+cancelada, 404). Cada petición guarda el id que necesita la siguiente en
+variables de colección (`experience_id`, `session_id`, `booking_id`), así
+que se puede ejecutar tal cual, en orden, sin copiar/pegar nada a mano —
+con el "Collection Runner" de Postman o con
+`npx newman run postman/reservas-experiencias.postman_collection.json`
+(con `make serve` arrancado). Solo hace falta importarla en Postman
+(File → Import) y tener el servidor levantado en `http://127.0.0.1:8000`
+(variable `base_url` de la colección, editable si usas otro puerto/host).
+
 ## Estructura del proyecto
 
 ```

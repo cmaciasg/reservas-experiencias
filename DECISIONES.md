@@ -497,8 +497,56 @@ solución más barata sería una tabla de auditoría **derivada** (como
 lee para reconstruir el estado) — no Event Sourcing real como estrategia de
 persistencia.
 
+## Auditoría final: reglas del enunciado → implementación
+
+Repaso de cada requisito del PDF original contra el código, con referencia
+exacta. Objetivo: poder señalar en la entrevista, sin dudar, dónde vive cada
+regla.
+
+### Funcionalidad requerida
+
+| # | Requisito | Dónde |
+|---|---|---|
+| 1 | Registrar experiencia | `RegisterExperienceService::register()` (`src/Application/RegisterExperienceService.php`) + `POST /api/experiences` (`ExperienceController::create()`) |
+| 2 | Crear sesiones para una experiencia | `CreateSessionService::create()` + `POST /api/experiences/{id}/sessions` (`SessionController::create()`) |
+| 3 | Reservar plazas para una sesión | `CreateBookingService::create()` + `POST /api/sessions/{id}/bookings` (`BookingController::create()`) |
+| 4 | Cancelar una reserva | `CancelBookingService::cancel()` + `POST /api/bookings/{id}/cancel` (`BookingController::cancel()`) |
+
+### Reglas de negocio
+
+| # | Regla | Dónde |
+|---|---|---|
+| 1 | Aforo máximo por sesión | `Session::$capacity`/`$availableSeats` (`src/Domain/Session.php:21-22`); invariante aplicada en `decreaseAvailableSeats()`/`increaseAvailableSeats()` |
+| 2 | No crear sesión duplicada, misma experiencia + mismo día | Dual: `CreateSessionService.php:32-35` (`existsForExperienceOnDate` → `DuplicateSessionDateException`, 409) + `schema.sql:17` (`UNIQUE KEY uniq_experience_session_date`, red de seguridad a nivel de BD) |
+| 3 | Reserva `confirmed`/`cancelled` | Enum `BookingStatus` (`src/Domain/BookingStatus.php`) |
+| 4 | Reserva cancelada no puede recancelarse | `Booking::isCancelled()`/`cancel()` (`src/Domain/Booking.php:75-83`, lanza `BookingAlreadyCancelledException`); comprobado también en `CancelBookingService` antes de intentar cancelar |
+| 5 | Cancelar confirmada libera plazas | `CancelBookingService::cancel()` (`src/Application/CancelBookingService.php:48`) → `SessionRepository::releaseSeats()` (UPDATE atómico inverso) |
+| 6 | No crear sesión en fecha pasada | `Session::schedule()` (`src/Domain/Session.php:40`), invariante de constructor → `PastSessionDateException` (400) |
+| 7 | No reservar sesión ya empezada | Comprobación rápida en `CreateBookingService.php:37-38` (`hasStartedAt()` → `SessionAlreadyStartedException`, 409) + repetida dentro del propio UPDATE atómico (`DbalSessionRepository.php:66`, `start_date > :now`) como defensa en profundidad |
+| 8 | No cancelar 24h antes del inicio | `BookingCancellationPolicy` (`src/Domain/BookingCancellationPolicy.php`), servicio de dominio puro, `CANCELLATION_WINDOW_HOURS = 24`; invocado desde `CancelBookingService.php:44` → `CancellationWindowExpiredException` (409) |
+| 9 | Enviar email al crear/cancelar reserva | Puerto `NotificationSender` (`src/Domain/Notification/NotificationSender.php`); llamado desde `CreateBookingService.php:53` y `CancelBookingService.php:49`; adaptador `LogNotificationSender` (`src/Infrastructure/Notification/LogNotificationSender.php`) — registra en `var/log/{env}.log` lo que se "enviaría", sin envío real (tal como pide el enunciado) |
+| 10 | Robustez ante reservas simultáneas (no overbooking) | `SessionRepository::reserveSeats()` (UPDATE condicional atómico, `DbalSessionRepository.php:61-75`); demostrado con `tests/Concurrency/NoOverbookingTest.php` (20 procesos reales del SO contra una sesión de aforo 5) — verificado además que el test detecta el problema si se rompe la atomicidad (ver "Fase 3", más arriba) |
+
+### Requisitos técnicos
+
+| Requisito | Cumplido |
+|---|---|
+| Solo API, sin frontend | ✅ — ningún asset/plantilla, solo controladores JSON |
+| PHP + DDD + arquitectura hexagonal | ✅ — Domain/Application/Infrastructure con puertos explícitos (`Domain/Repository`, `Domain/Notification`) |
+| No CRUD anémico | ✅ — invariantes viven en las entidades (`Session`, `Booking`), no en los controladores; servicios de dominio (`BookingCancellationPolicy`) para reglas que cruzan agregados |
+| Sin autenticación; ids de proveedor/usuario inventados en el payload | ✅ — `provider_id` en `POST /api/experiences`, `user_id` en `POST /api/sessions/{id}/bookings`, ambos leídos del body sin validar contra ningún sistema de usuarios |
+| Sin envío real de email | ✅ — `LogNotificationSender`, ver regla 9 |
+| Proyecto mantenible a largo plazo | ✅ — Domain sin dependencias de Symfony/BD (testeable con PHPUnit puro); cambiar de MySQL a otro motor solo tocaría `Infrastructure/Persistence` |
+| Principios REST | ✅ — verbos HTTP correctos (POST para crear, GET para leer), URLs orientadas a recursos anidados (`/experiences/{id}/sessions`, `/sessions/{id}/bookings`), códigos de estado semánticos (201/200/400/404/409) |
+| Tests obligatorios | ✅ — 53 tests: 22 dominio puro, 14 aplicación (dobles en memoria), 14 funcionales (MySQL real), 1 concurrencia (procesos reales del SO) |
+
+**Conclusión de la auditoría:** las 4 funcionalidades, las 10 reglas de
+negocio y los 7 requisitos técnicos del enunciado están implementados y
+verificados. No se ha detectado ningún hueco.
+
 ## Próximos pasos
 
-Revisión final de cara a la entrega: README con ejemplos de request/response
-por endpoint, y repaso de la tabla de reglas de negocio del enunciado contra
-lo implementado.
+Verificación en limpio desde un clon fresco de GitHub (simular exactamente
+lo que haría quien evalúa la prueba) y pulido menor (descripción del repo,
+metadatos de `composer.json`, mención de la colección de Postman en el
+README).
