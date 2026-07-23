@@ -176,10 +176,92 @@ plazas) para calcular `totalPrice`, sin conversión de divisas ni
 redondeos complejos — una dependencia externa sería sobreingeniería para
 esa necesidad.
 
+## Fase 2 — Application (casos de uso)
+
+### `IdGenerator` como puerto de Domain, en vez de IDs autoincrementales de MySQL
+
+**Decisión:** interfaz `Domain\IdGenerator` (`generate(): string`), inyectada
+en los servicios de Application, que la usan para dar identidad al agregado
+**antes** de guardarlo.
+
+**Alternativa descartada:** IDs autoincrementales de MySQL, como en
+Visiotech (`INTEGER PRIMARY KEY AUTOINCREMENT` de SQLite).
+
+**Por qué:** los factory methods del dominio (`Experience::register(id, ...)`,
+`Session::schedule(id, ...)`, `Booking::confirm(id, ...)`) construyen el
+agregado completo de una vez, con su id incluido — es el estilo que ya se
+había decidido en el modelado del dominio (fase 1). Con autoincremental de
+BD, el id solo existe *después* del `INSERT`, lo que obligaría a romper ese
+estilo (crear el objeto sin id, guardarlo, y luego "rellenarle" el id que
+devuelve la BD) solo para ahorrarse una interfaz. La implementación real
+(adaptador con `Symfony\Component\Uid`) llegará en la fase de Infrastructure;
+en esta fase los tests usan un `SequentialIdGenerator` en memoria
+(`tests/Application/InMemory/SequentialIdGenerator.php`, ids
+`"id-1"`, `"id-2"`...).
+
+### `Psr\Clock\ClockInterface` (PSR-20) en vez de `new \DateTimeImmutable()` disperso
+
+**Decisión:** los 4 servicios de Application reciben un
+`Psr\Clock\ClockInterface` por constructor y le piden `now()` cuando lo
+necesitan, en vez de instanciar la hora actual ellos mismos. Se añaden
+`psr/clock` (la interfaz, estándar PHP-FIG) y `symfony/clock` (implementación
+real + `MockClock` para tests).
+
+**Alternativa descartada:** cada servicio llama a `new \DateTimeImmutable()`
+directamente; o se inventa una interfaz `Domain\Clock` propia.
+
+**Por qué:** este ejercicio tiene *tres* reglas que dependen de "ahora"
+(sesión no en el pasado, sesión no empezada, ventana de cancelación de 24h) —
+sin una fuente de tiempo inyectable, testear los bordes exactos (23h vs. 24h,
+un segundo antes de que empiece la sesión) sería no determinista o obligaría
+a manipular relojes del sistema. `psr/clock` es el estándar ya existente para
+esto (PSR-20): usarlo evita inventar una interfaz propia para un problema ya
+resuelto por PHP-FIG, y `symfony/clock` aporta `MockClock` listo para tests
+sin escribir un doble a mano. El propio `Domain` (`Session`, `Booking`,
+`BookingCancellationPolicy`) sigue sin depender de esto — sus métodos siguen
+recibiendo `$now` como parámetro explícito; solo Application conoce el reloj.
+
+### `reserveSeats()`/`releaseSeats()`: el `InMemorySessionRepository` de test NO demuestra la concurrencia
+
+**Decisión:** el doble en memoria (`tests/Application/InMemory/InMemorySessionRepository.php`)
+implementa el puerto `SessionRepository` mutando el agregado en memoria — es
+monohilo, no hay dos peticiones reales compitiendo por la vez.
+
+**Por qué se documenta explícitamente esta limitación:** para no dar una
+falsa sensación de "la concurrencia ya está probada" con estos tests. Estos
+tests de Application solo comprueban que el servicio llama al puerto
+correctamente y reacciona bien a su resultado (reserva o rechaza). La prueba
+real de que no hay overbooking bajo concurrencia de verdad vendrá con el
+adaptador MySQL (`UPDATE ... WHERE available_seats >= :n`) y un test dedicado
+en `tests/Concurrency` que lanza peticiones en paralelo de verdad.
+
+### Excepciones "no encontrado" en `Application/Exception`, no en `Domain/Exception`
+
+**Decisión:** `ExperienceNotFoundException`, `SessionNotFoundException`,
+`BookingNotFoundException` vivan en `src/Application/Exception/`.
+
+**Por qué:** son fallos de *búsqueda* (orquestación: "¿existe esto en el
+repositorio?"), no violaciones de una regla de negocio del propio agregado —
+a diferencia de `PastSessionDateException` o `BookingAlreadyCancelledException`,
+que si viven en `Domain/Exception` porque las lanza el propio agregado al
+proteger su invariante. Mismo patrón que `src/Application/Exception` en
+Visiotech.
+
+### Orden de comprobaciones en `CancelBookingService`
+
+**Decisión:** primero se comprueba si la reserva ya está cancelada
+(`BookingAlreadyCancelledException`), y solo después la ventana de 24h
+(`CancellationWindowExpiredException`).
+
+**Por qué:** es un chequeo de estado más fundamental que uno temporal — no
+tiene sentido preguntar "¿todavía se puede cancelar a tiempo?" de algo que ya
+está cancelado. El propio `Booking::cancel()` repite la comprobación de
+"ya cancelada" como defensa en profundidad (el agregado protege su invariante
+pase lo que pase, no solo cuando el servicio se acuerda de comprobarlo antes).
+
 ## Próximos pasos
 
-Application (casos de uso: `RegisterExperience`, `CreateSession`,
-`CreateBooking`, `CancelBooking`) con sus dobles en memoria
-(`tests/Application/InMemory`), y después Infrastructure (repositorios DBAL
-con el UPDATE atómico real, controladores, adaptador de notificación) — ver
-plan acordado en `../notas.md`.
+Infrastructure: repositorios DBAL (con el UPDATE atómico real contra MySQL),
+adaptador de notificación (log), adaptador `IdGenerator` con
+`Symfony\Component\Uid`, controladores REST, y el test de concurrencia real
+en `tests/Concurrency` — ver plan acordado en `../notas.md`.

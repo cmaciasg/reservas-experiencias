@@ -5,10 +5,10 @@ proveedores externos: registro de experiencias, sesiones con aforo y precio, y
 reservas de plazas con cancelación. DDD y arquitectura hexagonal reales
 (puertos/adaptadores explícitos), persistencia en MySQL vía Docker.
 
-**Estado actual:** entorno base + dominio modelado (`Experience`, `Session`,
-`Booking`, `Money`, `BookingCancellationPolicy`, puertos de repositorio y
-notificación), con tests de dominio puros en verde. Aún sin casos de uso
-(Application), persistencia real ni endpoints (Infrastructure) — se irá
+**Estado actual:** entorno base + dominio modelado + casos de uso de
+Application (registrar experiencia, crear sesión, reservar plazas, cancelar
+reserva), todo probado con dobles en memoria (36 tests en verde, sin BD real
+todavía). Aún sin persistencia real ni endpoints (Infrastructure) — se irá
 ampliando en próximas sesiones. Este README crecerá con endpoints y más
 detalle a medida que avance la implementación.
 
