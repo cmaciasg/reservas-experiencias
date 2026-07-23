@@ -2,17 +2,21 @@ services:
   mysql:
     image: mysql:8
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: reservas_experiencias
-      MYSQL_USER: app
-      MYSQL_PASSWORD: app
+      # Local-only dev credentials — safe defaults, overridable via a root
+      # .env (Docker Compose reads it automatically) without touching this
+      # file. Note: MYSQL_USER/MYSQL_PASSWORD must stay in sync with the
+      # literal 'app' grants in docker/mysql/init.sql if overridden.
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-reservas_experiencias}
+      MYSQL_USER: ${MYSQL_USER:-app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-app}
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uapp", "-papp"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$$MYSQL_USER -p$$MYSQL_PASSWORD"]
       interval: 5s
       timeout: 5s
       retries: 10
