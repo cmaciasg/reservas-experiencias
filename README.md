@@ -65,16 +65,28 @@ php -S 127.0.0.1:8000 -t public public/index.php
 Sin autenticación (ids de proveedor/usuario inventados en el payload, tal
 como pide el enunciado). Payloads y respuestas en JSON, snake_case.
 
+### Experiencias
+
 | Acción | Endpoint | Body |
 |---|---|---|
 | Registrar experiencia | `POST /api/experiences` | `{"provider_id", "title", "description"}` |
 | Consultar experiencia | `GET /api/experiences/{id}` | — |
+
+### Sesiones
+
+| Acción | Endpoint | Body |
+|---|---|---|
 | Crear sesión | `POST /api/experiences/{id}/sessions` | `{"date" (ISO 8601), "capacity", "price_cents"}` |
 | Consultar sesión | `GET /api/sessions/{id}` | — |
+
+### Reservas
+
+| Acción | Endpoint | Body |
+|---|---|---|
 | Reservar plazas | `POST /api/sessions/{id}/bookings` | `{"user_id", "seats"}` |
-| Cancelar reserva | `POST /api/bookings/{id}/cancel` | — |
-| Consultar reserva | `GET /api/bookings/{id}` | — |
 | Reservas de una sesión | `GET /api/sessions/{id}/bookings` | — |
+| Consultar reserva | `GET /api/bookings/{id}` | — |
+| Cancelar reserva | `POST /api/bookings/{id}/cancel` | — |
 
 Códigos de error: `404` (recurso no encontrado), `409` (conflicto de
 negocio: sesión duplicada, sin plazas, sesión ya empezada, reserva ya
@@ -105,17 +117,31 @@ curl -X POST http://127.0.0.1:8000/api/bookings/{id}/cancel
 
 ### Colección de Postman
 
-`postman/reservas-experiencias.postman_collection.json` cubre el flujo
-completo (registrar → crear sesión → reservar → listar reservas de la
-sesión → cancelar) más los casos de error (409 duplicado, 409 ya
-cancelada, 404). Cada petición guarda el id que necesita la siguiente en
-variables de colección (`experience_id`, `session_id`, `booking_id`), así
-que se puede ejecutar tal cual, en orden, sin copiar/pegar nada a mano —
-con el "Collection Runner" de Postman o con
-`npx newman run postman/reservas-experiencias.postman_collection.json`
-(con `make serve` arrancado). Solo hace falta importarla en Postman
-(File → Import) y tener el servidor levantado en `http://127.0.0.1:8000`
-(variable `base_url` de la colección, editable si usas otro puerto/host).
+`postman/reservas-experiencias.postman_collection.json` cubre:
+
+- El flujo completo: registrar experiencia → crear sesión → reservar →
+  listar reservas de la sesión → cancelar.
+- Los principales casos de error: `409` (sesión duplicada, reserva ya
+  cancelada) y `404` (recurso inexistente).
+
+Cada petición guarda automáticamente en variables de colección
+(`experience_id`, `session_id`, `booking_id`) el id que necesita la
+siguiente, así que se puede ejecutar de principio a fin sin copiar/pegar
+nada a mano.
+
+**Cómo usarla:**
+
+1. Importar el fichero en Postman (`File → Import`).
+2. Tener el servidor arrancado (`make serve`) en `http://127.0.0.1:8000`
+   — o cambiar la variable `base_url` de la colección si usas otro
+   puerto/host.
+3. Ejecutar las peticiones en orden, a mano o con el "Collection Runner".
+
+También se puede correr desde terminal, sin abrir la aplicación de Postman:
+
+```bash
+npx newman run postman/reservas-experiencias.postman_collection.json
+```
 
 ## Estructura del proyecto
 
